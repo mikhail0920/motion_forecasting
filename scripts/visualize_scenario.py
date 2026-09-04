@@ -21,6 +21,7 @@ def main() -> None:
         help="scenario Parquet file or directory (default: data/val)",
     )
     parser.add_argument("--output", type=Path, help="image output path (default: outputs/<scenario-id>.png)")
+    parser.add_argument("--checkpoint", type=Path, help="optional trained MLP checkpoint to draw")
     args = parser.parse_args()
 
     scenario_path = find_scenario(args.scenario)
@@ -42,6 +43,25 @@ def main() -> None:
         future_steps=len(future_positions),
         future_timesteps=focal_track["timestep"][~focal_observed],
     )
+    mlp_prediction = None
+    if args.checkpoint is not None:
+        import torch
+
+        from motion_forecasting.models import TrajectoryMLP
+
+        checkpoint = torch.load(args.checkpoint, map_location="cpu", weights_only=True)
+        mlp = TrajectoryMLP(
+            past_steps=int(checkpoint["past_steps"]),
+            future_steps=int(checkpoint["future_steps"]),
+            hidden_dim=int(checkpoint["hidden_dim"]),
+        )
+        mlp.load_state_dict(checkpoint["model_state_dict"])
+        mlp.eval()
+        relative_history = focal_positions[focal_observed]
+        relative_history = relative_history - relative_history[-1]
+        with torch.inference_mode():
+            mlp_prediction = mlp(torch.from_numpy(relative_history.astype("float32")).unsqueeze(0))
+        mlp_prediction = mlp_prediction.squeeze(0).numpy() + focal_positions[focal_observed][-1]
 
     fig, ax = plt.subplots(figsize=(10, 10))
     for track in scenario["tracks"]:
@@ -52,6 +72,8 @@ def main() -> None:
             ax.plot(x[past], y[past], color="tab:blue", linewidth=2.8, label="Focal past")
             ax.plot(x[~past], y[~past], color="tab:orange", linewidth=2.8, linestyle="--", label="Focal future")
             ax.plot(prediction[:, 0], prediction[:, 1], color="tab:green", linewidth=2.4, linestyle=":", label="Constant velocity")
+            if mlp_prediction is not None:
+                ax.plot(mlp_prediction[:, 0], mlp_prediction[:, 1], color="tab:purple", linewidth=2.2, linestyle="-.", label="MLP")
             ax.scatter(x[past][-1], y[past][-1], color="black", s=35, zorder=5, label="Current position")
         else:
             ax.plot(x[past], y[past], color="0.65", linewidth=0.8, alpha=0.75)

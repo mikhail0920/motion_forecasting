@@ -15,5 +15,8 @@ dependencies = [
     "pyarrow>=14",
 ]
 
+[project.optional-dependencies]
+train = ["torch>=2.2"]
+
 [tool.setuptools.packages.find]
 where = ["src"]
