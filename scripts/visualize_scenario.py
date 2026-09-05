@@ -10,6 +10,7 @@ import numpy as np
 
 from motion_forecasting.baselines import ConstantVelocityPredictor
 from motion_forecasting.data import find_scenario, load_scenario
+from motion_forecasting.transforms import build_history_features, transform_to_agent_frame, transform_to_world_frame
 
 
 def main() -> None:
@@ -54,14 +55,21 @@ def main() -> None:
             past_steps=int(checkpoint["past_steps"]),
             future_steps=int(checkpoint["future_steps"]),
             hidden_dim=int(checkpoint["hidden_dim"]),
+            input_dim=int(checkpoint.get("input_dim", 2)),
         )
         mlp.load_state_dict(checkpoint["model_state_dict"])
         mlp.eval()
-        relative_history = focal_positions[focal_observed]
-        relative_history = relative_history - relative_history[-1]
+        representation = checkpoint.get("representation", "basic")
+        history_features, origin, angle = build_history_features(
+            past_positions,
+            representation=representation,
+        )
         with torch.inference_mode():
-            mlp_prediction = mlp(torch.from_numpy(relative_history.astype("float32")).unsqueeze(0))
-        mlp_prediction = mlp_prediction.squeeze(0).numpy() + focal_positions[focal_observed][-1]
+            local_prediction = mlp(
+                torch.from_numpy(history_features.astype("float32")).unsqueeze(0)
+            )
+        local_prediction = local_prediction.squeeze(0).numpy()
+        mlp_prediction = transform_to_world_frame(local_prediction, origin, angle)
 
     fig, ax = plt.subplots(figsize=(10, 10))
     for track in scenario["tracks"]:
