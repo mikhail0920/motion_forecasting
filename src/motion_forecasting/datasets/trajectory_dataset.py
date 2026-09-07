@@ -26,11 +26,14 @@ class TrajectoryDataset(Dataset[dict[str, torch.Tensor]]):
         past_steps: int = 50,
         future_steps: int = 60,
         representation: str = "agent-centric",
+        max_scenarios: int | None = None,
     ) -> None:
         if past_steps < 1 or future_steps < 1:
             raise ValueError("past_steps and future_steps must be positive")
         self.past_steps = past_steps
         self.future_steps = future_steps
+        if max_scenarios is not None and max_scenarios < 1:
+            raise ValueError("max_scenarios must be positive when specified")
         if representation not in {"basic", "agent-centric"}:
             raise ValueError("representation must be 'basic' or 'agent-centric'")
         self.representation = representation
@@ -45,6 +48,13 @@ class TrajectoryDataset(Dataset[dict[str, torch.Tensor]]):
         paths = sorted(root.rglob("scenario_*.parquet"))
         if not paths:
             raise FileNotFoundError(f"No scenario_*.parquet files found under {root}")
+        if max_scenarios is not None:
+            if max_scenarios > len(paths):
+                raise ValueError(
+                    f"Requested {max_scenarios} scenarios, but only {len(paths)} files "
+                    f"are available under {root}"
+                )
+            paths = paths[:max_scenarios]
 
         columns = [
             "track_id",

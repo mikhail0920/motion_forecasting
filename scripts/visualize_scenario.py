@@ -23,6 +23,7 @@ def main() -> None:
     )
     parser.add_argument("--output", type=Path, help="image output path (default: outputs/<scenario-id>.png)")
     parser.add_argument("--checkpoint", type=Path, help="optional trained MLP checkpoint to draw")
+    parser.add_argument("--gru-checkpoint", type=Path, help="optional trained GRU checkpoint to draw")
     args = parser.parse_args()
 
     scenario_path = find_scenario(args.scenario)
@@ -70,6 +71,30 @@ def main() -> None:
             )
         local_prediction = local_prediction.squeeze(0).numpy()
         mlp_prediction = transform_to_world_frame(local_prediction, origin, angle)
+    gru_prediction = None
+    if args.gru_checkpoint is not None:
+        import torch
+
+        from motion_forecasting.models import TrajectoryGRU
+
+        checkpoint = torch.load(args.gru_checkpoint, map_location="cpu", weights_only=True)
+        gru = TrajectoryGRU(
+            input_dim=int(checkpoint.get("input_dim", 4)),
+            hidden_dim=int(checkpoint["hidden_dim"]),
+            future_steps=int(checkpoint["future_steps"]),
+        )
+        gru.load_state_dict(checkpoint["model_state_dict"])
+        gru.eval()
+        history_features, origin, angle = build_history_features(
+            past_positions,
+            representation=checkpoint.get("representation", "agent-centric"),
+        )
+        with torch.inference_mode():
+            local_prediction = gru(
+                torch.from_numpy(history_features.astype("float32")).unsqueeze(0)
+            )
+        local_prediction = local_prediction.squeeze(0).numpy()
+        gru_prediction = transform_to_world_frame(local_prediction, origin, angle)
 
     fig, ax = plt.subplots(figsize=(10, 10))
     for track in scenario["tracks"]:
@@ -82,6 +107,8 @@ def main() -> None:
             ax.plot(prediction[:, 0], prediction[:, 1], color="tab:green", linewidth=2.4, linestyle=":", label="Constant velocity")
             if mlp_prediction is not None:
                 ax.plot(mlp_prediction[:, 0], mlp_prediction[:, 1], color="tab:purple", linewidth=2.2, linestyle="-.", label="MLP")
+            if gru_prediction is not None:
+                ax.plot(gru_prediction[:, 0], gru_prediction[:, 1], color="tab:red", linewidth=2.2, linestyle="-.", label="GRU")
             ax.scatter(x[past][-1], y[past][-1], color="black", s=35, zorder=5, label="Current position")
         else:
             ax.plot(x[past], y[past], color="0.65", linewidth=0.8, alpha=0.75)
