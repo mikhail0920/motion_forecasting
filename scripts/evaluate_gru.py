@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 from pathlib import Path
 
 import numpy as np
@@ -20,9 +21,11 @@ def main() -> None:
     parser.add_argument("--checkpoint", type=Path, required=True)
     parser.add_argument("--device", default="cpu")
     parser.add_argument("--batch-size", type=int, default=256)
+    parser.add_argument("--num-workers", type=int, default=0)
+    parser.add_argument("--metrics-output", type=Path, help="JSON output path (default: checkpoint basename .metrics.json)")
     args = parser.parse_args()
-    if args.batch_size < 1:
-        parser.error("batch-size must be positive")
+    if args.batch_size < 1 or args.num_workers < 0:
+        parser.error("batch-size must be positive and num-workers cannot be negative")
     if not args.checkpoint.is_file():
         parser.error(f"checkpoint does not exist: {args.checkpoint}")
     if args.device.startswith("cuda") and not torch.cuda.is_available():
@@ -44,7 +47,7 @@ def main() -> None:
     model.load_state_dict(checkpoint["model_state_dict"])
     model.eval()
 
-    loader = DataLoader(dataset, batch_size=args.batch_size, shuffle=False)
+    loader = DataLoader(dataset, batch_size=args.batch_size, shuffle=False, num_workers=args.num_workers)
     ade_scores: list[float] = []
     fde_scores: list[float] = []
     with torch.inference_mode():
@@ -56,10 +59,32 @@ def main() -> None:
                 ade_scores.append(ade(pred, truth))
                 fde_scores.append(fde(pred, truth))
 
+    ade_value = float(np.mean(ade_scores))
+    fde_value = float(np.mean(fde_scores))
+    metrics_output = args.metrics_output or args.checkpoint.with_suffix(".metrics.json")
+    metrics_output.parent.mkdir(parents=True, exist_ok=True)
+    metrics_output.write_text(
+        json.dumps(
+            {
+                "scenarios": len(dataset),
+                "ade_m": ade_value,
+                "fde_m": fde_value,
+                "checkpoint": str(args.checkpoint),
+                "train_scenarios": checkpoint.get("train_scenarios"),
+                "seed": checkpoint.get("seed"),
+                "best_epoch": checkpoint.get("epoch"),
+                "representation": checkpoint.get("representation", "agent-centric"),
+            },
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
+
     print("GRU Trajectory Forecasting")
     print(f"Scenarios: {len(dataset)}")
-    print(f"ADE: {np.mean(ade_scores):.3f} m")
-    print(f"FDE: {np.mean(fde_scores):.3f} m")
+    print(f"ADE: {ade_value:.3f} m")
+    print(f"FDE: {fde_value:.3f} m")
+    print(f"Saved metrics to {metrics_output}")
     if dataset.skipped_scenarios:
         print(f"Skipped: {len(dataset.skipped_scenarios)}")
 
