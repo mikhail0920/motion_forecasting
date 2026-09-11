@@ -26,15 +26,16 @@ def _seed_worker(worker_id: int) -> None:
 
 def _plot_learning_curves(rows: list[dict[str, float]], path: Path) -> None:
     epochs = [int(row["epoch"]) for row in rows]
-    figure, (loss_ax, metric_ax) = plt.subplots(1, 2, figsize=(11, 4))
-    loss_ax.plot(epochs, [row["train_loss"] for row in rows], marker="o")
-    loss_ax.set(title="Training MSE", xlabel="Epoch", ylabel="MSE")
-    loss_ax.grid(True, alpha=0.3)
-    metric_ax.plot(epochs, [row["val_ade"] for row in rows], marker="o", label="ADE")
-    metric_ax.plot(epochs, [row["val_fde"] for row in rows], marker="o", label="FDE")
-    metric_ax.set(title="Validation displacement error", xlabel="Epoch", ylabel="Meters")
-    metric_ax.grid(True, alpha=0.3)
-    metric_ax.legend()
+    figure, axes = plt.subplots(1, 3, figsize=(15, 4))
+    curves = (
+        ("train_loss", "Training MSE", "MSE"),
+        ("val_ade", "Validation ADE", "Meters"),
+        ("val_fde", "Validation FDE", "Meters"),
+    )
+    for axis, (column, title, ylabel) in zip(axes, curves):
+        axis.plot(epochs, [row[column] for row in rows], marker="o")
+        axis.set(title=title, xlabel="Epoch", ylabel=ylabel)
+        axis.grid(True, alpha=0.3)
     figure.tight_layout()
     path.parent.mkdir(parents=True, exist_ok=True)
     figure.savefig(path, dpi=160)
@@ -72,14 +73,15 @@ def main() -> None:
     )
     parser.add_argument("--num-workers", type=int, default=0, help="DataLoader worker processes")
     parser.add_argument("--seed", type=int, default=42)
+    parser.add_argument("--run-name", default="gru", help="name for this run's history under runs/<run-name>/")
     parser.add_argument("--output", type=Path, default=Path("checkpoints/gru.pt"))
-    parser.add_argument("--metrics-csv", type=Path, help="per-epoch CSV path (default: checkpoint basename .csv)")
-    parser.add_argument("--learning-curve", type=Path, help="plot path (default: checkpoint basename _learning_curves.png)")
     args = parser.parse_args()
     if args.epochs < 1 or args.batch_size < 1 or args.learning_rate <= 0 or args.num_workers < 0:
         parser.error("epochs, batch-size, and learning-rate must be positive; num-workers cannot be negative")
     if args.train_scenarios is not None and args.train_scenarios < 1:
         parser.error("train-scenarios must be positive")
+    if not args.run_name.strip() or Path(args.run_name).name != args.run_name or args.run_name in {".", ".."}:
+        parser.error("run-name must be a non-empty directory name without path components")
     if args.device.startswith("cuda") and not torch.cuda.is_available():
         parser.error("CUDA was requested but is not available in this PyTorch environment")
 
@@ -125,10 +127,9 @@ def main() -> None:
     optimizer = torch.optim.Adam(model.parameters(), lr=args.learning_rate)
     loss_function = nn.MSELoss()
     best_val_ade = float("inf")
-    metrics_csv = args.metrics_csv or args.output.with_suffix(".csv")
-    learning_curve = args.learning_curve or args.output.with_name(
-        f"{args.output.stem}_learning_curves.png"
-    )
+    run_dir = Path("runs") / args.run_name
+    metrics_csv = run_dir / "metrics.csv"
+    learning_curve = run_dir / "learning_curves.png"
     metrics_csv.parent.mkdir(parents=True, exist_ok=True)
     args.output.parent.mkdir(parents=True, exist_ok=True)
     rows: list[dict[str, float]] = []
