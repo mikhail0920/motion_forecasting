@@ -73,7 +73,7 @@ def main() -> None:
     parser.add_argument("--batch-size", type=int, default=256)
     parser.add_argument("--learning-rate", type=float, default=1e-3)
     parser.add_argument("--hidden-dim", type=int, default=128)
-    parser.add_argument("--max-neighbors", type=int, default=8)
+    parser.add_argument("--num-neighbors", "--max-neighbors", dest="max_neighbors", type=int, default=8)
     parser.add_argument("--train-scenarios", type=int)
     parser.add_argument("--num-workers", type=int, default=0)
     parser.add_argument("--seed", type=int, default=42)
