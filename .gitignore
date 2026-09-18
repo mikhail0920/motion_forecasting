@@ -9,6 +9,7 @@ dist/
 /data/
 /checkpoints/
 /runs/
+/cache/
 
 # Generated plots
 /outputs/

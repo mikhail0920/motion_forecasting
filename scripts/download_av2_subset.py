@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 from concurrent.futures import ThreadPoolExecutor, as_completed
+import json
 import shutil
 import time
 import urllib.error
@@ -43,6 +44,36 @@ def _has_parquet_magic(path: Path) -> bool:
             return file.read(4) == b"PAR1"
     except OSError:
         return False
+
+
+def _has_map_json(path: Path) -> bool:
+    try:
+        with path.open("r", encoding="utf-8") as file:
+            return "lane_segments" in json.load(file)
+    except (OSError, json.JSONDecodeError):
+        return False
+
+
+def _download_validated_file(url: str, target: Path, validator, description: str) -> None:
+    temporary = target.with_suffix(target.suffix + ".part")
+    request = urllib.request.Request(
+        url, headers={"User-Agent": "motion-forecasting-av2-subset/1.0"}
+    )
+    last_error: Exception | None = None
+    for attempt in range(3):
+        try:
+            with _open_with_retries(request, timeout=120) as response, temporary.open("wb") as file:
+                shutil.copyfileobj(response, file)
+            if not validator(temporary):
+                raise RuntimeError(f"downloaded {description} is incomplete or invalid")
+            temporary.replace(target)
+            return
+        except (urllib.error.URLError, OSError, RuntimeError) as exc:
+            last_error = exc
+            temporary.unlink(missing_ok=True)
+            if attempt < 2:
+                time.sleep(2**attempt)
+    raise RuntimeError(f"Failed to download {description}: {last_error}") from last_error
 
 
 def list_scenario_ids(split: str, *, limit: int | None = None) -> list[str]:
@@ -85,35 +116,32 @@ def list_scenario_ids(split: str, *, limit: int | None = None) -> list[str]:
     return sorted(scenario_ids)
 
 
-def download_scenario(scenario_id: str, split: str, output_dir: Path) -> Path:
-    """Download only one scenario Parquet, preserving the AV2 directory layout."""
+def download_scenario(
+    scenario_id: str,
+    split: str,
+    output_dir: Path,
+    *,
+    include_maps: bool = False,
+) -> Path:
+    """Download one scenario Parquet and optionally its vector map JSON."""
     filename = f"scenario_{scenario_id}.parquet"
     target_dir = output_dir / scenario_id
     target = target_dir / filename
-    if _has_parquet_magic(target):
+    map_target = target_dir / f"log_map_archive_{scenario_id}.json"
+    if _has_parquet_magic(target) and (not include_maps or _has_map_json(map_target)):
         return target
-    target.unlink(missing_ok=True)
 
     target_dir.mkdir(parents=True, exist_ok=True)
-    key = f"{S3_PREFIX}/{split}/{scenario_id}/{filename}"
-    url = f"{S3_ENDPOINT}{urllib.parse.quote(key, safe='/')}"
-    temporary = target.with_suffix(target.suffix + ".part")
-    request = urllib.request.Request(url, headers={"User-Agent": "motion-forecasting-av2-subset/1.0"})
-    last_error: Exception | None = None
-    for attempt in range(3):
-        try:
-            with _open_with_retries(request, timeout=120) as response, temporary.open("wb") as file:
-                shutil.copyfileobj(response, file)
-            if not _has_parquet_magic(temporary):
-                raise RuntimeError("downloaded file is truncated or lacks Parquet magic bytes")
-            temporary.replace(target)
-            return target
-        except (urllib.error.URLError, OSError, RuntimeError) as exc:
-            last_error = exc
-            temporary.unlink(missing_ok=True)
-            if attempt < 2:
-                time.sleep(2**attempt)
-    raise RuntimeError(f"Failed to download scenario {scenario_id}: {last_error}") from last_error
+    if not _has_parquet_magic(target):
+        target.unlink(missing_ok=True)
+        key = f"{S3_PREFIX}/{split}/{scenario_id}/{filename}"
+        url = f"{S3_ENDPOINT}{urllib.parse.quote(key, safe='/')}"
+        _download_validated_file(url, target, _has_parquet_magic, f"scenario {scenario_id} Parquet")
+    if include_maps and not _has_map_json(map_target):
+        map_key = f"{S3_PREFIX}/{split}/{scenario_id}/{map_target.name}"
+        map_url = f"{S3_ENDPOINT}{urllib.parse.quote(map_key, safe='/')}"
+        _download_validated_file(map_url, map_target, _has_map_json, f"scenario {scenario_id} map JSON")
+    return target
 
 
 def main() -> None:
@@ -121,6 +149,11 @@ def main() -> None:
     parser.add_argument("--split", choices=("train", "val"), required=True)
     parser.add_argument("--num-scenarios", type=int, required=True)
     parser.add_argument("--output", type=Path, required=True)
+    parser.add_argument(
+        "--include-maps",
+        action="store_true",
+        help="also download log_map_archive_<scenario_id>.json beside each Parquet",
+    )
     parser.add_argument(
         "--workers",
         type=int,
@@ -151,7 +184,13 @@ def main() -> None:
     started = time.monotonic()
     with ThreadPoolExecutor(max_workers=args.workers) as executor:
         futures = [
-            executor.submit(download_scenario, scenario_id, args.split, args.output)
+            executor.submit(
+                download_scenario,
+                scenario_id,
+                args.split,
+                args.output,
+                include_maps=args.include_maps,
+            )
             for scenario_id in selected
         ]
         for index, future in enumerate(as_completed(futures), start=1):
