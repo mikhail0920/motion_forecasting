@@ -42,6 +42,20 @@ class MultimodalForecaster(MapAwareInteractionGRU):
         lanes: torch.Tensor,
         lane_mask: torch.Tensor,
     ) -> tuple[torch.Tensor, torch.Tensor]:
+        trajectories, logits, _ = self.generate_with_context(
+            history, neighbors, neighbor_mask, lanes, lane_mask
+        )
+        return trajectories, logits
+
+    def generate_with_context(
+        self,
+        history: torch.Tensor,
+        neighbors: torch.Tensor,
+        neighbor_mask: torch.Tensor,
+        lanes: torch.Tensor,
+        lane_mask: torch.Tensor,
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        """Return the original candidates, logits, and shared scene embedding."""
         scene_embedding, _, _ = self.encode_scene(
             history, neighbors, neighbor_mask, lanes, lane_mask
         )
@@ -53,4 +67,4 @@ class MultimodalForecaster(MapAwareInteractionGRU):
             batch_size, self.num_modes, self.future_steps, 2
         )
         logits = self.probability_head(scene_embedding)
-        return trajectories, logits
+        return trajectories, logits, scene_embedding
