@@ -32,13 +32,21 @@ python -m pip install -e .
 The `data/` directory is intentionally excluded from Git. The working copy has
 500 training scenarios under `data/train/` and the 500-scenario validation
 subset under `data/val/`; the first validation scenario also has its local map
-archive. The validation IDs are recorded in `data/val_scenario_ids.txt` so
-remote experiments can verify that they use the same scenarios. To add more
-scenarios, download the matching
-`scenario_<id>.parquet` and `log_map_archive_<id>.json` files into a folder
-under `data/val/` from the public Argoverse S3 bucket:
+archive. The validation IDs are recorded in `splits/val_scenario_ids.txt` so
+experiments can use the same scenarios. The downloader sorts all scenario IDs,
+takes the first N, and downloads only `scenario_<id>.parquet` files:
 
-`s3://argoverse/datasets/av2/motion-forecasting/val/<scenario-id>/`
+```bash
+python scripts/download_av2_subset.py \
+  --split train \
+  --num-scenarios 20000 \
+  --output data/train
+
+python scripts/download_av2_subset.py \
+  --split val \
+  --num-scenarios 500 \
+  --output data/val
+```
 
 ## Inspect and visualize
 
@@ -121,7 +129,6 @@ MLP v1; `agent-centric` is the new coordinate and feature representation.
 | Constant Velocity | — | 4.762 | 12.194 |
 | MLP basic | 500 | 5.605 | 13.255 |
 | MLP agent-centric | 500 | 4.446 | 11.154 |
-| MLP agent-centric | 10k+ | TBD | TBD |
 
 ## GRU sequence model
 
@@ -133,8 +140,8 @@ and ADE/FDE evaluation as the MLP.
 CPU smoke run on the current 500 training scenarios:
 
 ```powershell
-python scripts/train_gru.py --train-data data/train --val-data data/val --device cpu --epochs 2 --batch-size 256 --hidden-dim 128 --seed 42 --num-workers 0 --output checkpoints/gru.pt
-python scripts/evaluate_gru.py --data data/val --checkpoint checkpoints/gru.pt
+python scripts/train_gru.py --train-data data/train --val-data data/val --device cpu --epochs 2 --batch-size 256 --hidden-dim 128 --seed 42 --num-workers 0 --run-name gru-500-smoke --output checkpoints/gru-500-smoke.pt
+python scripts/evaluate_gru.py --data data/val --checkpoint checkpoints/gru-500-smoke.pt
 ```
 
 For a small-data comparison closer to the 20-epoch MLP run, train with
@@ -142,20 +149,25 @@ For a small-data comparison closer to the 20-epoch MLP run, train with
 of optimizer updates on 500 examples.
 
 Training seeds Python, NumPy, PyTorch, CUDA, and the shuffled sampler. Worker
-seeds derive from PyTorch's seeded generator. Each run writes a per-epoch CSV
-(`epoch,train_loss,val_ade,val_fde`), a learning-curve PNG, and the checkpoint
-with the lowest validation ADE. For Colab, the same scripts accept
+seeds derive from PyTorch's seeded generator. Each run writes its history to
+`runs/<run_name>/metrics.csv` (`epoch,train_loss,val_ade,val_fde`) and saves a
+three-panel learning curve (train MSE, validation ADE, validation FDE) beside
+it. Checkpoints remain under `checkpoints/` and use the lowest validation ADE.
+For Colab, the same scripts accept
 `--device cuda --num-workers 4`; increase the training set and pass
 `--train-scenarios 5000` or `--train-scenarios 20000` when the selected training
-directory contains that many Parquet files. The current local subset contains
-500 train scenes, so the larger-scale runs have not been performed.
+directory contains that many Parquet files. Set a distinct `--run-name` for
+each experiment, for example `gru-500`, `gru-5k`, and `gru-20k`.
 
 | Model | Train scenes | ADE ↓ (m) | FDE ↓ (m) |
 | --- | ---: | ---: | ---: |
-| GRU agent-centric (2 epochs, batch 256) | 500 | 19.079 | 37.209 |
-| GRU agent-centric (20 epochs, batch 64) | 500 | 5.798 | 14.048 |
-| GRU agent-centric | 5k | TBD | TBD |
-| GRU agent-centric | 20k | TBD | TBD |
+| Constant Velocity | — | 4.762 | 12.194 |
+| MLP agent-centric | 500 | 4.446 | 11.154 |
+| GRU agent-centric | 500 | 5.798 | 14.048 |
+| GRU agent-centric | 5,000 | 3.861 | 10.035 |
+| GRU agent-centric | 20,000 | 3.714 | 9.742 |
+
+5k/20k trained in Google Colab; all models evaluated on the same 500 validation scenarios.
 
 To compare ground truth, Constant Velocity, MLP, and GRU on representative
 straight, turning, braking, and sharp-maneuver examples:
