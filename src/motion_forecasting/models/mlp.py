@@ -14,14 +14,16 @@ class TrajectoryMLP(nn.Module):
         past_steps: int = 50,
         future_steps: int = 60,
         hidden_dim: int = 256,
+        input_dim: int = 4,
     ) -> None:
         super().__init__()
-        if past_steps < 1 or future_steps < 1 or hidden_dim < 1:
-            raise ValueError("past_steps, future_steps, and hidden_dim must be positive")
+        if past_steps < 1 or future_steps < 1 or hidden_dim < 1 or input_dim < 1:
+            raise ValueError("all model dimensions must be positive")
         self.past_steps = past_steps
         self.future_steps = future_steps
+        self.input_dim = input_dim
         self.network = nn.Sequential(
-            nn.Linear(past_steps * 2, hidden_dim),
+            nn.Linear(past_steps * input_dim, hidden_dim),
             nn.ReLU(),
             nn.Linear(hidden_dim, hidden_dim),
             nn.ReLU(),
@@ -29,9 +31,9 @@ class TrajectoryMLP(nn.Module):
         )
 
     def forward(self, history: torch.Tensor) -> torch.Tensor:
-        if history.ndim != 3 or history.shape[1:] != (self.past_steps, 2):
+        if history.ndim != 3 or history.shape[1:] != (self.past_steps, self.input_dim):
             raise ValueError(
-                f"history must have shape (batch, {self.past_steps}, 2), "
+                f"history must have shape (batch, {self.past_steps}, {self.input_dim}), "
                 f"got {tuple(history.shape)}"
             )
         prediction = self.network(history.flatten(start_dim=1))

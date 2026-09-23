@@ -29,10 +29,10 @@ python -m pip install -e .
 
 ## Data
 
-The `data/` directory is intentionally excluded from Git. A small validation
-subset of 500 scenario Parquet files is in the working copy under `data/val/`;
-the first scenario also has its local map archive. To add more scenarios,
-download the matching
+The `data/` directory is intentionally excluded from Git. The working copy has
+500 training scenarios under `data/train/` and the 500-scenario validation
+subset under `data/val/`; the first validation scenario also has its local map
+archive. To add more scenarios, download the matching
 `scenario_<id>.parquet` and `log_map_archive_<id>.json` files into a folder
 under `data/val/` from the public Argoverse S3 bucket:
 
@@ -80,11 +80,15 @@ error over future timesteps; FDE measures the error at the final future point.
 
 ## First learned model: focal-agent MLP
 
-The dataset uses 50 observed and 60 future positions. Both are shifted by the
-last observed position, which becomes `(0, 0)`. The MLP flattens the history,
-passes it through two ReLU hidden layers, and predicts the complete future path
-in one forward pass. Training minimizes coordinate-wise MSE; ADE and FDE remain
-the reported evaluation metrics.
+The dataset uses 50 observed and 60 future positions. In the agent-centric
+representation, the last observed position becomes `(0, 0)` and the estimated
+direction of motion is rotated onto the local `+x` axis. Each history step
+contains `[x, y, dx, dy]`, where displacement is measured in local coordinates
+and the first history step uses zero displacement because it has no predecessor.
+The inverse transform restores predictions to world coordinates for plots.
+The MLP architecture stays the same: flatten history, pass it through two ReLU
+hidden layers, and predict the complete future path in one pass. Training uses
+coordinate-wise MSE; ADE and FDE remain the evaluation metrics.
 
 Install PyTorch if it is not already available (Colab has it preinstalled):
 
@@ -92,11 +96,12 @@ Install PyTorch if it is not already available (Colab has it preinstalled):
 python -m pip install -e ".[train]"
 ```
 
-Train and evaluate on the same local 500-scene validation subset:
+Train on the local 500-scene training subset and evaluate on the same 500
+validation scenarios used for the earlier models:
 
 ```powershell
-python scripts/train_mlp.py --train-data data/train --val-data data/val --device cpu --epochs 20 --batch-size 64 --output checkpoints/mlp.pt
-python scripts/evaluate_mlp.py --data data/val --checkpoint checkpoints/mlp.pt
+python scripts/train_mlp.py --train-data data/train --val-data data/val --device cpu --epochs 20 --batch-size 64 --representation agent-centric --output checkpoints/mlp_agent_centric.pt
+python scripts/evaluate_mlp.py --data data/val --checkpoint checkpoints/mlp_agent_centric.pt
 ```
 
 Training uses the 500-scenario training subset under `data/train/`. A longer
@@ -105,17 +110,23 @@ run and GPU use the same scripts and checkpoint format; for example, pass
 
 ### Validation comparison
 
-These MLP values are from a 20-epoch CPU run on 500 training scenarios. The
-checkpoint is selected by the lowest validation ADE.
+The MLP checkpoints below are from 20-epoch CPU runs on 500 training scenarios.
+Each checkpoint is selected by the lowest validation ADE. `basic` reproduces
+MLP v1; `agent-centric` is the new coordinate and feature representation.
 
-| Model | ADE ↓ (m) | FDE ↓ (m) |
-| --- | ---: | ---: |
-| Constant Velocity | 4.762 | 12.194 |
-| MLP (20 epochs) | 5.605 | 13.255 |
+| Model | Train scenes | ADE ↓ (m) | FDE ↓ (m) |
+| --- | ---: | ---: | ---: |
+| Constant Velocity | — | 4.762 | 12.194 |
+| MLP basic | 500 | 5.605 | 13.255 |
+| MLP agent-centric | 500 | 4.446 | 11.154 |
+| MLP agent-centric | 10k+ | TBD | TBD |
 
 To draw the trained MLP beside the Constant Velocity prediction and ground
 truth, pass its checkpoint to the visualizer:
 
 ```powershell
-python scripts/visualize_scenario.py --checkpoint checkpoints/mlp.pt
+python scripts/visualize_scenario.py --checkpoint checkpoints/mlp_agent_centric.pt
 ```
+
+To reproduce the earlier XY-only MLP, pass `--representation basic` while
+training; evaluation reads the representation from the saved checkpoint.

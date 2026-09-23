@@ -9,9 +9,10 @@ import pandas as pd
 import torch
 from torch.utils.data import Dataset
 
+from motion_forecasting.transforms import build_history_features, transform_to_agent_frame
 
 class TrajectoryDataset(Dataset[dict[str, torch.Tensor]]):
-    """Return relative focal-agent history and future tensors.
+    """Return focal-agent history features and local future tensors.
 
     The default lengths match AV2's 5 s observed and 6 s prediction windows at
     10 Hz. Scenarios without exactly these numbers of focal states are skipped
@@ -24,11 +25,16 @@ class TrajectoryDataset(Dataset[dict[str, torch.Tensor]]):
         *,
         past_steps: int = 50,
         future_steps: int = 60,
+        representation: str = "agent-centric",
     ) -> None:
         if past_steps < 1 or future_steps < 1:
             raise ValueError("past_steps and future_steps must be positive")
         self.past_steps = past_steps
         self.future_steps = future_steps
+        if representation not in {"basic", "agent-centric"}:
+            raise ValueError("representation must be 'basic' or 'agent-centric'")
+        self.representation = representation
+        self.input_dim = 4 if representation == "agent-centric" else 2
         self.samples: list[dict[str, torch.Tensor]] = []
         self.scenario_ids: list[str] = []
         self.skipped_scenarios: list[str] = []
@@ -65,12 +71,16 @@ class TrajectoryDataset(Dataset[dict[str, torch.Tensor]]):
                 self.skipped_scenarios.append(scenario_id)
                 continue
 
-            # Translation normalization makes the last observed point the origin.
-            origin = past[-1].copy()
+            history, origin, angle = build_history_features(past, representation)
+            future_local, _, _ = transform_to_agent_frame(
+                future,
+                origin=origin,
+                angle=angle,
+            )
             self.samples.append(
                 {
-                    "history": torch.from_numpy(past - origin),
-                    "future": torch.from_numpy(future - origin),
+                    "history": torch.from_numpy(history.astype(np.float32)),
+                    "future": torch.from_numpy(future_local.astype(np.float32)),
                 }
             )
             self.scenario_ids.append(scenario_id)

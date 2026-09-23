@@ -39,6 +39,12 @@ def main() -> None:
     parser.add_argument("--batch-size", type=int, default=256)
     parser.add_argument("--learning-rate", type=float, default=1e-3)
     parser.add_argument("--hidden-dim", type=int, default=256)
+    parser.add_argument(
+        "--representation",
+        choices=("agent-centric", "basic"),
+        default="agent-centric",
+        help="agent-centric XY+displacement features, or MLP v1 translated XY",
+    )
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--output", type=Path, default=Path("checkpoints/mlp.pt"))
     args = parser.parse_args()
@@ -50,11 +56,12 @@ def main() -> None:
     torch.manual_seed(args.seed)
     np.random.seed(args.seed)
     device = torch.device(args.device)
-    train_data = TrajectoryDataset(args.train_data)
+    train_data = TrajectoryDataset(args.train_data, representation=args.representation)
     val_data = TrajectoryDataset(
         args.val_data,
         past_steps=train_data.past_steps,
         future_steps=train_data.future_steps,
+        representation=args.representation,
     )
     generator = torch.Generator().manual_seed(args.seed)
     train_loader = DataLoader(train_data, batch_size=args.batch_size, shuffle=True, generator=generator)
@@ -64,6 +71,7 @@ def main() -> None:
         past_steps=train_data.past_steps,
         future_steps=train_data.future_steps,
         hidden_dim=args.hidden_dim,
+        input_dim=train_data.input_dim,
     ).to(device)
     optimizer = torch.optim.Adam(model.parameters(), lr=args.learning_rate)
     loss_function = nn.MSELoss()
@@ -99,6 +107,8 @@ def main() -> None:
                     "past_steps": train_data.past_steps,
                     "future_steps": train_data.future_steps,
                     "hidden_dim": args.hidden_dim,
+                    "input_dim": train_data.input_dim,
+                    "representation": args.representation,
                     "epoch": epoch,
                     "val_ade": val_ade,
                     "val_fde": val_fde,

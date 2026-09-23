@@ -34,11 +34,13 @@ def main() -> None:
         args.data,
         past_steps=int(checkpoint["past_steps"]),
         future_steps=int(checkpoint["future_steps"]),
+        representation=checkpoint.get("representation", "basic"),
     )
     model = TrajectoryMLP(
         past_steps=int(checkpoint["past_steps"]),
         future_steps=int(checkpoint["future_steps"]),
         hidden_dim=int(checkpoint["hidden_dim"]),
+        input_dim=int(checkpoint.get("input_dim", 2)),
     ).to(device)
     model.load_state_dict(checkpoint["model_state_dict"])
     model.eval()
