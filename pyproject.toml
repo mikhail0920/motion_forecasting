@@ -17,6 +17,7 @@ dependencies = [
 
 [project.optional-dependencies]
 train = ["torch>=2.2"]
+maps = ["av2>=0.3.6"]
 
 [tool.setuptools.packages.find]
 where = ["src"]

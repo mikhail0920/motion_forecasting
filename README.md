@@ -48,6 +48,15 @@ python scripts/download_av2_subset.py \
   --output data/val
 ```
 
+For map-aware experiments, install the optional AV2 map API and include the
+vector-map JSON archives while downloading:
+
+```powershell
+python -m pip install -e ".[maps,train]"
+python scripts/download_av2_subset.py --split train --num-scenarios 20000 --output data/train_20k --include-maps
+python scripts/download_av2_subset.py --split val --num-scenarios 500 --output data/val --include-maps
+```
+
 ## Inspect and visualize
 
 From the project root, the scripts use the first Parquet scenario found under
@@ -249,6 +258,42 @@ The Colab workflow is in `notebooks/train_av2_colab.ipynb`. Set its repository
 URL and Drive dataset path, then run its cells to train all three data sizes
 with the same seed and validation subset. The notebook saves checkpoints,
 per-epoch metrics, and the combined scaling plot to Drive.
+
+## Map-Aware Interaction GRU
+
+The map-aware model adds 16 nearby lane centerlines to the focal and neighbor
+GRU encoders. Each centerline is resampled to 20 points and transformed into
+the focal agent's local frame. A shared point MLP and max pooling encode each
+lane, and focal-conditioned masked attention pools lane and neighbor context.
+The map cache is precomputed once (and ignored by Git), so vector-map JSON is
+not parsed on every training epoch. This uses the official AV2 static-map API
+to load each `log_map_archive_<id>.json` and read lane-segment centerlines.
+
+Precompute lane tensors, then train and evaluate with the same 20k training
+scenarios, 500 validation scenarios, seed 42, and CPU setup:
+
+```powershell
+python scripts/precompute_map_context.py --data data/train_20k --output cache/train_20k_maps.npz --max-lanes 16 --points-per-lane 20
+python scripts/precompute_map_context.py --data data/val --output cache/val_500_maps.npz --max-lanes 16 --points-per-lane 20
+python scripts/train_map_aware_gru.py --train-data data/train_20k --val-data data/val --train-map-cache cache/train_20k_maps.npz --val-map-cache cache/val_500_maps.npz --train-scenarios 20000 --epochs 20 --batch-size 256 --hidden-dim 128 --num-neighbors 8 --seed 42 --device cpu --run-name map-aware-20k-cpu --output checkpoints/map_aware_interaction_gru_20k.pt
+python scripts/evaluate_map_aware_gru.py --data data/val --map-cache cache/val_500_maps.npz --checkpoint checkpoints/map_aware_interaction_gru_20k.pt --device cpu
+```
+
+Validation comparison (same 500 validation scenarios):
+
+| Model | Train scenes | ADE ↓ (m) | FDE ↓ (m) |
+| --- | ---: | ---: | ---: |
+| GRU agent-centric | 20,000 | 3.812 | 9.925 |
+| Social GRU mean | 20,000 | 3.801 | 9.726 |
+| Social attention | 20,000 | 3.776 | 9.720 |
+| Map-aware interaction GRU | 20,000 | 3.531 | 8.821 |
+
+The map-aware run used 20 epochs on CPU; best validation ADE was at epoch 20.
+Its per-epoch metrics and learning curve are saved in
+`runs/map-aware-20k-cpu/metrics.csv` and
+`runs/map-aware-20k-cpu/learning_curves.png`; the checkpoint also records its
+best-epoch validation metrics. Evaluation prints lane-attention weights for
+three validation scenes.
 
 To draw the trained MLP beside the Constant Velocity prediction and ground
 truth, pass its checkpoint to the visualizer:
