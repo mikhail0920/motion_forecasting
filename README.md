@@ -196,6 +196,45 @@ python scripts/evaluate_social_gru.py \
 The training objective remains coordinate-wise MSE, and validation uses the
 same ADE/FDE metrics as the single-agent GRU.
 
+## Interaction GRU
+
+`InteractionTrajectoryGRU` replaces mean pooling with a masked attention
+module over the shared neighbor-GRU embeddings. Attention scores are computed
+from focal context and each neighbor embedding. Optional physics features add
+relative position and velocity, distance, signed closing speed (positive when
+approaching), and time to closest approach. Velocities use AV2's 10 Hz
+timesteps. Padding neighbors are masked before softmax; scenes with no
+neighbors receive a zero social context.
+
+Train the attention-only and attention-plus-physics variants with identical
+data and hyperparameters, changing only the interaction-feature flag:
+
+```bash
+python scripts/train_interaction_gru.py \
+  --train-data data/train_20k --val-data data/val \
+  --train-scenarios 20000 --epochs 20 --batch-size 256 \
+  --hidden-dim 128 --num-neighbors 8 --interaction-features false \
+  --seed 42 --device cuda --run-name interaction-attention \
+  --output checkpoints/interaction_gru.pt
+
+python scripts/train_interaction_gru.py \
+  --train-data data/train_20k --val-data data/val \
+  --train-scenarios 20000 --epochs 20 --batch-size 256 \
+  --hidden-dim 128 --num-neighbors 8 --interaction-features true \
+  --seed 42 --device cuda --run-name interaction-physics \
+  --output checkpoints/interaction_gru_physics.pt
+
+python scripts/evaluate_interaction_gru.py \
+  --data data/val --checkpoint checkpoints/interaction_gru.pt --device cuda
+
+python scripts/evaluate_interaction_gru.py \
+  --data data/val --checkpoint checkpoints/interaction_gru_physics.pt --device cuda
+```
+
+Evaluation reports ADE/FDE and prints the top attended neighbors for three
+scenarios by default. Checkpoints, per-epoch CSVs, and learning curves retain
+the interaction-feature setting for reproducibility.
+
 To compare ground truth, Constant Velocity, MLP, and GRU on representative
 straight, turning, braking, and sharp-maneuver examples:
 
