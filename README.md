@@ -186,7 +186,7 @@ Smoke train and evaluation on the local 500-scene subsets:
 python scripts/train_social_gru.py \
   --train-data data/train --val-data data/val \
   --device cpu --epochs 1 --batch-size 256 \
-  --train-scenarios 500 --run-name social-gru-smoke \
+  --train-scenarios 500 --num-neighbors 8 --run-name social-gru-smoke \
   --output checkpoints/social_gru.pt
 
 python scripts/evaluate_social_gru.py \

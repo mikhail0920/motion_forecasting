@@ -32,6 +32,19 @@ def _open_with_retries(request: urllib.request.Request, *, timeout: int):
     raise RuntimeError("request retries exhausted")
 
 
+def _has_parquet_magic(path: Path) -> bool:
+    try:
+        if path.stat().st_size < 8:
+            return False
+        with path.open("rb") as file:
+            if file.read(4) != b"PAR1":
+                return False
+            file.seek(-4, 2)
+            return file.read(4) == b"PAR1"
+    except OSError:
+        return False
+
+
 def list_scenario_ids(split: str, *, limit: int | None = None) -> list[str]:
     """List sorted scenario IDs, stopping once enough ordered S3 prefixes exist."""
     scenario_ids: set[str] = set()
@@ -77,24 +90,30 @@ def download_scenario(scenario_id: str, split: str, output_dir: Path) -> Path:
     filename = f"scenario_{scenario_id}.parquet"
     target_dir = output_dir / scenario_id
     target = target_dir / filename
-    if target.is_file() and target.stat().st_size > 0:
+    if _has_parquet_magic(target):
         return target
+    target.unlink(missing_ok=True)
 
     target_dir.mkdir(parents=True, exist_ok=True)
     key = f"{S3_PREFIX}/{split}/{scenario_id}/{filename}"
     url = f"{S3_ENDPOINT}{urllib.parse.quote(key, safe='/')}"
     temporary = target.with_suffix(target.suffix + ".part")
     request = urllib.request.Request(url, headers={"User-Agent": "motion-forecasting-av2-subset/1.0"})
-    try:
-        with _open_with_retries(request, timeout=120) as response, temporary.open("wb") as file:
-            shutil.copyfileobj(response, file)
-        if temporary.stat().st_size == 0:
-            raise RuntimeError(f"Downloaded an empty scenario file: {url}")
-        temporary.replace(target)
-    except (urllib.error.URLError, OSError, RuntimeError) as exc:
-        temporary.unlink(missing_ok=True)
-        raise RuntimeError(f"Failed to download scenario {scenario_id}: {exc}") from exc
-    return target
+    last_error: Exception | None = None
+    for attempt in range(3):
+        try:
+            with _open_with_retries(request, timeout=120) as response, temporary.open("wb") as file:
+                shutil.copyfileobj(response, file)
+            if not _has_parquet_magic(temporary):
+                raise RuntimeError("downloaded file is truncated or lacks Parquet magic bytes")
+            temporary.replace(target)
+            return target
+        except (urllib.error.URLError, OSError, RuntimeError) as exc:
+            last_error = exc
+            temporary.unlink(missing_ok=True)
+            if attempt < 2:
+                time.sleep(2**attempt)
+    raise RuntimeError(f"Failed to download scenario {scenario_id}: {last_error}") from last_error
 
 
 def main() -> None:
@@ -105,8 +124,8 @@ def main() -> None:
     parser.add_argument(
         "--workers",
         type=int,
-        default=16,
-        help="parallel scenario downloads (default: 16)",
+        default=64,
+        help="parallel scenario downloads (default: 64)",
     )
     args = parser.parse_args()
     if args.num_scenarios < 1:
