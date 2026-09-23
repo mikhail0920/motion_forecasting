@@ -29,9 +29,10 @@ python -m pip install -e .
 
 ## Data
 
-The `data/` directory is intentionally excluded from Git. For a small first
-example, one validation scenario and its local map archive are included in the
-working copy under `data/val/`. To add more scenarios, download the matching
+The `data/` directory is intentionally excluded from Git. A small validation
+subset of 500 scenario Parquet files is in the working copy under `data/val/`;
+the first scenario also has its local map archive. To add more scenarios,
+download the matching
 `scenario_<id>.parquet` and `log_map_archive_<id>.json` files into a folder
 under `data/val/` from the public Argoverse S3 bucket:
 
@@ -55,10 +56,24 @@ python scripts/visualize_scenario.py data/val/<scenario-id> --output outputs/exa
 ```
 
 The plot shows the focal agent's past as a solid line, its future ground truth
-as a dashed line, and surrounding actors as thin grey trajectories.
+as a dashed line, the constant-velocity prediction as a dotted line, and
+surrounding actors as thin grey trajectories.
 
 ## First milestone
 
 Take an AV2 scenario, print its track structure, and save a bird's-eye view of
-the focal agent's past and future. The next milestone will add a Constant
-Velocity baseline and compare it against ADE and FDE.
+the focal agent's past, future ground truth, and baseline prediction.
+
+## Constant Velocity baseline
+
+The first baseline estimates velocity from the mean of the last five
+displacements and extrapolates linearly at AV2's 10 Hz sampling interval.
+Coordinates and ADE/FDE values are in meters. Run it on the available
+validation subset:
+
+```powershell
+python scripts/evaluate_constant_velocity.py --data data/val
+```
+
+Use `--limit 500` to cap evaluation at 500 scenarios. ADE averages Euclidean
+error over future timesteps; FDE measures the error at the final future point.
