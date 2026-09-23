@@ -8,6 +8,7 @@ dist/
 # AV2 data is large and remains local. Keep only the placeholder in Git.
 /data/*
 !/data/.gitkeep
+!/data/val_scenario_ids.txt
 
 # Generated plots
 /outputs/

@@ -32,7 +32,9 @@ python -m pip install -e .
 The `data/` directory is intentionally excluded from Git. The working copy has
 500 training scenarios under `data/train/` and the 500-scenario validation
 subset under `data/val/`; the first validation scenario also has its local map
-archive. To add more scenarios, download the matching
+archive. The validation IDs are recorded in `data/val_scenario_ids.txt` so
+remote experiments can verify that they use the same scenarios. To add more
+scenarios, download the matching
 `scenario_<id>.parquet` and `log_map_archive_<id>.json` files into a folder
 under `data/val/` from the public Argoverse S3 bucket:
 
@@ -131,7 +133,7 @@ and ADE/FDE evaluation as the MLP.
 CPU smoke run on the current 500 training scenarios:
 
 ```powershell
-python scripts/train_gru.py --train-data data/train --val-data data/val --device cpu --epochs 2 --batch-size 256 --hidden-dim 128 --output checkpoints/gru.pt
+python scripts/train_gru.py --train-data data/train --val-data data/val --device cpu --epochs 2 --batch-size 256 --hidden-dim 128 --seed 42 --num-workers 0 --output checkpoints/gru.pt
 python scripts/evaluate_gru.py --data data/val --checkpoint checkpoints/gru.pt
 ```
 
@@ -139,10 +141,14 @@ For a small-data comparison closer to the 20-epoch MLP run, train with
 `--epochs 20 --batch-size 64`; this gives both models roughly the same number
 of optimizer updates on 500 examples.
 
-For Colab, the same scripts accept `--device cuda`; increase the training set
-and pass `--train-scenarios 5000` or `--train-scenarios 20000` when the selected
-training directory contains that many Parquet files. The current local subset
-contains 500 train scenes, so the larger-scale runs have not been performed.
+Training seeds Python, NumPy, PyTorch, CUDA, and the shuffled sampler. Worker
+seeds derive from PyTorch's seeded generator. Each run writes a per-epoch CSV
+(`epoch,train_loss,val_ade,val_fde`), a learning-curve PNG, and the checkpoint
+with the lowest validation ADE. For Colab, the same scripts accept
+`--device cuda --num-workers 4`; increase the training set and pass
+`--train-scenarios 5000` or `--train-scenarios 20000` when the selected training
+directory contains that many Parquet files. The current local subset contains
+500 train scenes, so the larger-scale runs have not been performed.
 
 | Model | Train scenes | ADE ↓ (m) | FDE ↓ (m) |
 | --- | ---: | ---: | ---: |
@@ -160,6 +166,11 @@ python scripts/visualize_model_cases.py --data data/val --mlp-checkpoint checkpo
 
 The case selector uses future ground truth only to choose illustrative plots;
 those labels are not fed to either model.
+
+The Colab workflow is in `notebooks/train_av2_colab.ipynb`. Set its repository
+URL and Drive dataset path, then run its cells to train all three data sizes
+with the same seed and validation subset. The notebook saves checkpoints,
+per-epoch metrics, and the combined scaling plot to Drive.
 
 To draw the trained MLP beside the Constant Velocity prediction and ground
 truth, pass its checkpoint to the visualizer:
