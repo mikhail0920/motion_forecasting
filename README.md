@@ -169,6 +169,33 @@ each experiment, for example `gru-500`, `gru-5k`, and `gru-20k`.
 
 5k/20k trained in Google Colab; all models evaluated on the same 500 validation scenarios.
 
+## Social GRU
+
+`SocialTrajectoryDataset` adds the eight actors that are nearest to the focal
+agent at the final observed timestep. It returns focal history `[50, 4]`,
+neighbor histories `[8, 50, 5]`, an actor-level `neighbor_mask` `[8]`, and the
+focal future `[60, 2]`. Neighbor features are local-frame `[x, y, dx, dy, valid]`;
+the per-timestep `valid` bit distinguishes missing states from a real actor at
+the zero-padded coordinate. A shared neighbor GRU encodes each actor,
+then masked mean pooling produces the social context joined with the focal GRU
+state.
+
+Smoke train and evaluation on the local 500-scene subsets:
+
+```bash
+python scripts/train_social_gru.py \
+  --train-data data/train --val-data data/val \
+  --device cpu --epochs 1 --batch-size 256 \
+  --train-scenarios 500 --run-name social-gru-smoke \
+  --output checkpoints/social_gru.pt
+
+python scripts/evaluate_social_gru.py \
+  --data data/val --checkpoint checkpoints/social_gru.pt --device cpu
+```
+
+The training objective remains coordinate-wise MSE, and validation uses the
+same ADE/FDE metrics as the single-agent GRU.
+
 To compare ground truth, Constant Velocity, MLP, and GRU on representative
 straight, turning, braking, and sharp-maneuver examples:
 
