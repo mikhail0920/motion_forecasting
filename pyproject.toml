@@ -1,0 +1,18 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "motion-forecasting"
+version = "0.1.0"
+description = "A step-by-step Argoverse 2 motion forecasting project"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "matplotlib>=3.8",
+    "pandas>=2.1",
+    "pyarrow>=14",
+]
+
+[tool.setuptools.packages.find]
+where = ["src"]
