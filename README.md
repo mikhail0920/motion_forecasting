@@ -121,6 +121,46 @@ MLP v1; `agent-centric` is the new coordinate and feature representation.
 | MLP agent-centric | 500 | 4.446 | 11.154 |
 | MLP agent-centric | 10k+ | TBD | TBD |
 
+## GRU sequence model
+
+The GRU reads the same 50-step agent-centric `[x, y, dx, dy]` sequence as the
+MLP. Its final hidden state is mapped directly to all 60 future positions, so
+there is no autoregressive feedback loop. It uses the same MSE training loss
+and ADE/FDE evaluation as the MLP.
+
+CPU smoke run on the current 500 training scenarios:
+
+```powershell
+python scripts/train_gru.py --train-data data/train --val-data data/val --device cpu --epochs 2 --batch-size 256 --hidden-dim 128 --output checkpoints/gru.pt
+python scripts/evaluate_gru.py --data data/val --checkpoint checkpoints/gru.pt
+```
+
+For a small-data comparison closer to the 20-epoch MLP run, train with
+`--epochs 20 --batch-size 64`; this gives both models roughly the same number
+of optimizer updates on 500 examples.
+
+For Colab, the same scripts accept `--device cuda`; increase the training set
+and pass `--train-scenarios 5000` or `--train-scenarios 20000` when the selected
+training directory contains that many Parquet files. The current local subset
+contains 500 train scenes, so the larger-scale runs have not been performed.
+
+| Model | Train scenes | ADE ↓ (m) | FDE ↓ (m) |
+| --- | ---: | ---: | ---: |
+| GRU agent-centric (2 epochs, batch 256) | 500 | 19.079 | 37.209 |
+| GRU agent-centric (20 epochs, batch 64) | 500 | 5.798 | 14.048 |
+| GRU agent-centric | 5k | TBD | TBD |
+| GRU agent-centric | 20k | TBD | TBD |
+
+To compare ground truth, Constant Velocity, MLP, and GRU on representative
+straight, turning, braking, and sharp-maneuver examples:
+
+```powershell
+python scripts/visualize_model_cases.py --data data/val --mlp-checkpoint checkpoints/mlp_agent_centric.pt --gru-checkpoint checkpoints/gru.pt
+```
+
+The case selector uses future ground truth only to choose illustrative plots;
+those labels are not fed to either model.
+
 To draw the trained MLP beside the Constant Velocity prediction and ground
 truth, pass its checkpoint to the visualizer:
 
