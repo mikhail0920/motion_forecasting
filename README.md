@@ -77,3 +77,45 @@ python scripts/evaluate_constant_velocity.py --data data/val
 
 Use `--limit 500` to cap evaluation at 500 scenarios. ADE averages Euclidean
 error over future timesteps; FDE measures the error at the final future point.
+
+## First learned model: focal-agent MLP
+
+The dataset uses 50 observed and 60 future positions. Both are shifted by the
+last observed position, which becomes `(0, 0)`. The MLP flattens the history,
+passes it through two ReLU hidden layers, and predicts the complete future path
+in one forward pass. Training minimizes coordinate-wise MSE; ADE and FDE remain
+the reported evaluation metrics.
+
+Install PyTorch if it is not already available (Colab has it preinstalled):
+
+```powershell
+python -m pip install -e ".[train]"
+```
+
+Train and evaluate on the same local 500-scene validation subset:
+
+```powershell
+python scripts/train_mlp.py --train-data data/train --val-data data/val --device cpu --epochs 20 --batch-size 64 --output checkpoints/mlp.pt
+python scripts/evaluate_mlp.py --data data/val --checkpoint checkpoints/mlp.pt
+```
+
+Training uses the 500-scenario training subset under `data/train/`. A longer
+run and GPU use the same scripts and checkpoint format; for example, pass
+`--device cuda --epochs 20 --batch-size 256`.
+
+### Validation comparison
+
+These MLP values are from a 20-epoch CPU run on 500 training scenarios. The
+checkpoint is selected by the lowest validation ADE.
+
+| Model | ADE ↓ (m) | FDE ↓ (m) |
+| --- | ---: | ---: |
+| Constant Velocity | 4.762 | 12.194 |
+| MLP (20 epochs) | 5.605 | 13.255 |
+
+To draw the trained MLP beside the Constant Velocity prediction and ground
+truth, pass its checkpoint to the visualizer:
+
+```powershell
+python scripts/visualize_scenario.py --checkpoint checkpoints/mlp.pt
+```
