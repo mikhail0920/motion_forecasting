@@ -352,6 +352,34 @@ same 500 validation scenarios:
 On this run the soft targets did not improve confidence selection or oracle
 coverage. The per-epoch results are in `runs/multimodal-soft-20k-cpu/metrics.csv`.
 
+### Frozen trajectory-aware reranker
+
+The reranker is trained as a separate second stage from the hard-winner
+checkpoint. The multimodal generator is frozen and run once to cache its six
+candidates and concatenated focal/social/map scene embedding. A trajectory MLP
+encodes each full candidate path; a scorer combines that embedding with scene
+context and predicts a score per candidate. Cross-entropy targets the candidate
+with the lowest `ADE + 0.5 * FDE`. Reranker checkpoints are selected by
+validation top-1 ADE. Since generated trajectories are cached and never
+updated, minADE/minFDE and MissRate must remain identical to the generator.
+
+```powershell
+python scripts/train_reranker.py --train-data data/train_20k --val-data data/val --train-scenarios 20000 --generator-checkpoint checkpoints/multimodal_20k.pt --epochs 20 --batch-size 256 --reranker-hidden-dim 128 --seed 42 --device cpu --run-name trajectory-reranker-20k-cpu --output checkpoints/trajectory_reranker_20k.pt
+python scripts/evaluate_reranker.py --data data/val --map-cache cache/val_500_maps.npz --generator-checkpoint checkpoints/multimodal_20k.pt --reranker-checkpoint checkpoints/trajectory_reranker_20k.pt --device cpu --miss-threshold 2.0
+```
+
+Both models use the same 20,000 training scenarios and 500 validation
+scenarios. The reranker best checkpoint was selected at epoch 10:
+
+| Scoring | minADE@6 ↓ (m) | minFDE@6 ↓ (m) | Top-1 ADE ↓ (m) | Top-1 FDE ↓ (m) | MissRate@6 ↓ |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Original hard head | 1.733 | 3.813 | 3.911 | 9.960 | 0.708 |
+| Trajectory-aware reranker | 1.733 | 3.813 | 3.774 | 9.564 | 0.708 |
+
+The reranker modestly improves candidate selection while preserving oracle
+coverage exactly. Its epoch history is in
+`runs/trajectory-reranker-20k-cpu/metrics.csv`.
+
 To draw the trained MLP beside the Constant Velocity prediction and ground
 truth, pass its checkpoint to the visualizer:
 
