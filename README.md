@@ -380,6 +380,59 @@ The reranker modestly improves candidate selection while preserving oracle
 coverage exactly. Its epoch history is in
 `runs/trajectory-reranker-20k-cpu/metrics.csv`.
 
+## Lane-conditioned multimodal decoder
+
+`LaneConditionedForecaster` retains the pretrained focal, neighbor-attention,
+and map encoders, then replaces the abstract multimodal decoder with four
+route-conditioned modes and two free modes. The four route hypotheses use the
+four most map-attended lane centerlines. For each route, the decoder samples a
+speed-based anchor along the lane and predicts a learned residual around that
+anchor. Free modes use a zero anchor. The scene encoder is initialized from
+the hard-winner multimodal checkpoint and frozen; the candidate decoder and
+mode scoring head are trained with the same best-of-K MSE, hard winner CE,
+and endpoint diversity loss. Checkpoints are selected by validation minADE@6.
+
+Train and evaluate on the same 20k training and 500 validation scenarios:
+
+```powershell
+python scripts/train_lane_conditioned.py --train-data data/train_20k --val-data data/val --train-map-cache cache/train_20k_maps.npz --val-map-cache cache/val_500_maps.npz --train-scenarios 20000 --epochs 20 --batch-size 256 --hidden-dim 128 --num-neighbors 8 --num-modes 6 --num-lane-modes 4 --classification-weight 0.5 --diversity-weight 0.05 --diversity-margin 2.0 --miss-threshold 2.0 --seed 42 --device cpu --run-name lane-conditioned-20k-cpu --output checkpoints/lane_conditioned_20k.pt
+python scripts/evaluate_lane_conditioned.py --data data/val --map-cache cache/val_500_maps.npz --checkpoint checkpoints/lane_conditioned_20k.pt --device cpu
+python scripts/train_reranker.py --train-data data/train_20k --val-data data/val --generator-checkpoint checkpoints/lane_conditioned_20k.pt --train-map-cache cache/train_20k_maps.npz --val-map-cache cache/val_500_maps.npz --train-scenarios 20000 --epochs 20 --batch-size 256 --reranker-hidden-dim 128 --seed 42 --device cpu --run-name lane-conditioned-reranker-20k-cpu --output checkpoints/trajectory_reranker_lane_conditioned_20k.pt
+python scripts/evaluate_lane_conditioned.py --data data/val --map-cache cache/val_500_maps.npz --checkpoint checkpoints/lane_conditioned_20k.pt --reranker-checkpoint checkpoints/trajectory_reranker_lane_conditioned_20k.pt --device cpu
+```
+
+Results on the same 500 validation scenarios; MissRate counts scenes whose
+best candidate endpoint is more than 2 m from ground truth:
+
+| Generator | Train scenes | minADE@6 ↓ (m) | minFDE@6 ↓ (m) | MissRate@6 ↓ |
+| --- | ---: | ---: | ---: | ---: |
+| Free multimodal | 20,000 | 1.733 | 3.813 | 0.708 |
+| Lane-conditioned (4 lane + 2 free) | 20,000 | 1.691 | 3.632 | 0.658 |
+
+The best lane-conditioned checkpoint was selected at epoch 18. This is a
+modest coverage gain over the free-mode generator. Training history is in
+`runs/lane-conditioned-20k-cpu/metrics.csv`; the three-panel loss/oracle-ADE/
+MissRate plot is in `runs/lane-conditioned-20k-cpu/learning_curves.png`.
+
+The existing trajectory reranker can be applied to these candidates with:
+
+```powershell
+python scripts/evaluate_lane_conditioned.py --data data/val --map-cache cache/val_500_maps.npz --checkpoint checkpoints/lane_conditioned_20k.pt --reranker-checkpoint checkpoints/trajectory_reranker_20k.pt --device cpu
+```
+
+The old reranker was trained on free-mode candidates, so this is a transfer
+check, not a retrained comparison. On lane-conditioned candidates it produced
+top-1 ADE/FDE of 5.317/12.738 m, worse than the lane generator's own
+4.207/10.417 m. Oracle metrics remain unchanged at 1.691/3.632 m with
+MissRate 0.658. The existing scorer architecture was then retrained on the
+lane-conditioned generator's cached candidates (20k train, 500 validation)
+and selected at epoch 19. It achieved top-1 ADE/FDE 3.663/8.994 m; oracle
+metrics remained 1.691/3.632 m and MissRate 0.658. Thus ranking improved over
+the lane generator's own head while candidate coverage stayed fixed. The
+retrained scorer history is in
+`runs/lane-conditioned-reranker-20k-cpu/metrics.csv`. The evaluator writes
+results to `checkpoints/lane_conditioned_20k.metrics.json`.
+
 To draw the trained MLP beside the Constant Velocity prediction and ground
 truth, pass its checkpoint to the visualizer:
 

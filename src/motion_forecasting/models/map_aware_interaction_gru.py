@@ -104,6 +104,33 @@ class MapAwareInteractionGRU(nn.Module):
         lane_mask: torch.Tensor,
     ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         """Return the unchanged focal/social/map representation and attentions."""
+        (
+            focal_embedding,
+            social_context,
+            map_context,
+            social_weights,
+            map_weights,
+            _,
+        ) = self.encode_scene_components(history, neighbors, neighbor_mask, lanes, lane_mask)
+        scene_embedding = torch.cat((focal_embedding, social_context, map_context), dim=-1)
+        return scene_embedding, social_weights, map_weights
+
+    def encode_scene_components(
+        self,
+        history: torch.Tensor,
+        neighbors: torch.Tensor,
+        neighbor_mask: torch.Tensor,
+        lanes: torch.Tensor,
+        lane_mask: torch.Tensor,
+    ) -> tuple[
+        torch.Tensor,
+        torch.Tensor,
+        torch.Tensor,
+        torch.Tensor,
+        torch.Tensor,
+        torch.Tensor,
+    ]:
+        """Return focal/social/map contexts plus per-lane embeddings for routing."""
         batch_size = history.shape[0]
         if history.ndim != 3 or history.shape[-1] != self.input_dim:
             raise ValueError(
@@ -177,5 +204,11 @@ class MapAwareInteractionGRU(nn.Module):
         map_weights = _masked_softmax(map_scores, lane_mask)
         map_context = (lane_embeddings * map_weights.unsqueeze(-1)).sum(dim=1)
 
-        scene_embedding = torch.cat((focal_embedding, social_context, map_context), dim=-1)
-        return scene_embedding, social_weights, map_weights
+        return (
+            focal_embedding,
+            social_context,
+            map_context,
+            social_weights,
+            map_weights,
+            lane_embeddings,
+        )
