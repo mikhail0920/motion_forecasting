@@ -327,6 +327,31 @@ truth than the single-path model, while probability-selected top-1 is weaker
 in this run. Per-epoch loss and validation history is in
 `runs/multimodal-20k-cpu/metrics.csv`; its learning curve is saved beside it.
 
+### Quality-aware scoring ablation
+
+The soft-scoring variant keeps the encoder, decoder, best-of-K regression,
+diversity penalty, data, seed, and training schedule fixed. Only the
+probability-head objective changes: detached per-mode quality
+`ADE + 0.5 * FDE` is converted to a target distribution with temperature 1.0,
+then trained with KL divergence. The soft target is recalculated from each
+batch's current trajectory predictions.
+
+```powershell
+python scripts/train_multimodal.py --train-data data/train_20k --val-data data/val --train-scenarios 20000 --epochs 20 --batch-size 256 --num-modes 6 --classification-weight 0.5 --diversity-weight 0.05 --scoring-loss soft --scoring-temperature 1.0 --miss-threshold 2.0 --seed 42 --device cpu --run-name multimodal-soft-20k-cpu --output checkpoints/multimodal_soft_20k.pt
+python scripts/evaluate_multimodal.py --data data/val --map-cache cache/val_500_maps.npz --checkpoint checkpoints/multimodal_soft_20k.pt --device cpu --miss-threshold 2.0
+```
+
+Both checkpoints are selected by validation minADE@6, then evaluated on the
+same 500 validation scenarios:
+
+| Multimodal scoring | minADE@6 ↓ (m) | minFDE@6 ↓ (m) | Top-1 ADE ↓ (m) | Top-1 FDE ↓ (m) | MissRate@6 ↓ |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Hard winner CE (epoch 20) | 1.733 | 3.813 | 3.911 | 9.960 | 0.708 |
+| Soft quality targets (epoch 13) | 1.794 | 4.168 | 4.187 | 10.727 | 0.794 |
+
+On this run the soft targets did not improve confidence selection or oracle
+coverage. The per-epoch results are in `runs/multimodal-soft-20k-cpu/metrics.csv`.
+
 To draw the trained MLP beside the Constant Velocity prediction and ground
 truth, pass its checkpoint to the visualizer:
 

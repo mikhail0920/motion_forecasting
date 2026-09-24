@@ -11,6 +11,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import torch
 from torch import nn
+from torch.nn import functional as F
 from torch.utils.data import DataLoader
 
 from motion_forecasting.datasets import MapContextDataset, SocialTrajectoryDataset
@@ -86,6 +87,8 @@ def main() -> None:
     parser.add_argument("--num-neighbors", type=int, default=8)
     parser.add_argument("--num-modes", type=int, default=6)
     parser.add_argument("--classification-weight", type=float, default=0.5)
+    parser.add_argument("--scoring-loss", choices=("hard", "soft"), default="hard")
+    parser.add_argument("--scoring-temperature", type=float, default=1.0)
     parser.add_argument("--diversity-weight", type=float, default=0.05)
     parser.add_argument("--diversity-margin", type=float, default=2.0)
     parser.add_argument("--miss-threshold", type=float, default=2.0)
@@ -99,10 +102,11 @@ def main() -> None:
         args.epochs < 1 or args.batch_size < 1 or args.learning_rate <= 0
         or args.hidden_dim < 1 or args.num_neighbors < 1 or args.num_modes < 1
         or args.classification_weight < 0 or args.diversity_weight < 0
+        or args.scoring_temperature <= 0
         or args.diversity_margin < 0 or args.miss_threshold < 0
         or args.num_workers < 0
     ):
-        parser.error("dimensions and epochs must be positive; loss weights and thresholds must be non-negative")
+        parser.error("dimensions and epochs must be positive, temperature must be positive, and loss weights and thresholds must be non-negative")
     if args.train_scenarios is not None and args.train_scenarios < 1:
         parser.error("train-scenarios must be positive")
     if not args.run_name.strip() or Path(args.run_name).name != args.run_name or args.run_name in {".", ".."}:
@@ -194,7 +198,23 @@ def main() -> None:
                 errors = (trajectories - target.unsqueeze(1)).square().mean(dim=(2, 3))
                 best_modes = errors.argmin(dim=1)
                 trajectory_loss = errors.gather(1, best_modes.unsqueeze(1)).mean()
-                classification_loss = cross_entropy(logits, best_modes)
+                if args.scoring_loss == "hard":
+                    classification_loss = cross_entropy(logits, best_modes)
+                else:
+                    displacement = torch.linalg.vector_norm(
+                        trajectories - target.unsqueeze(1), dim=-1
+                    )
+                    quality_error = (
+                        displacement.mean(dim=-1) + 0.5 * displacement[:, :, -1]
+                    ).detach()
+                    target_probs = torch.softmax(
+                        -quality_error / args.scoring_temperature, dim=1
+                    )
+                    classification_loss = F.kl_div(
+                        F.log_softmax(logits, dim=1),
+                        target_probs,
+                        reduction="batchmean",
+                    )
                 if args.num_modes > 1:
                     endpoints = trajectories[:, :, -1]
                     distances = torch.linalg.vector_norm(
@@ -252,6 +272,8 @@ def main() -> None:
                         "seed": args.seed,
                         "epoch": epoch,
                         "classification_weight": args.classification_weight,
+                        "scoring_loss": args.scoring_loss,
+                        "scoring_temperature": args.scoring_temperature,
                         "diversity_weight": args.diversity_weight,
                         "diversity_margin": args.diversity_margin,
                         "miss_threshold": args.miss_threshold,
