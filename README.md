@@ -295,6 +295,38 @@ Its per-epoch metrics and learning curve are saved in
 best-epoch validation metrics. Evaluation prints lane-attention weights for
 three validation scenes.
 
+## Multimodal decoder
+
+`MultimodalForecaster` keeps the map-aware focal, social, and map encoders and
+replaces only the single-path decoder. Six learned mode embeddings produce six
+full futures; a probability head predicts logits for selecting a mode. Training
+uses best-of-K coordinate MSE, cross-entropy for the best mode, and a small
+pairwise endpoint diversity penalty. The checkpoint is selected by validation
+minADE@K. Evaluation reports probability-selected top-1 ADE/FDE, oracle
+minADE@K/minFDE@K, and MissRate@K (a miss is a best final-point error above the
+configurable threshold).
+
+Train and evaluate with the precomputed map caches:
+
+```powershell
+python scripts/train_multimodal.py --train-data data/train_20k --val-data data/val --train-scenarios 20000 --epochs 20 --batch-size 256 --num-modes 6 --classification-weight 0.5 --diversity-weight 0.05 --miss-threshold 2.0 --seed 42 --device cpu --run-name multimodal-20k-cpu --output checkpoints/multimodal_20k.pt
+python scripts/evaluate_multimodal.py --data data/val --map-cache cache/val_500_maps.npz --checkpoint checkpoints/multimodal_20k.pt --device cpu --miss-threshold 2.0
+```
+
+Results on 20,000 training scenarios and the same 500 validation scenarios,
+with seed 42 and CPU training (best checkpoint: epoch 20):
+
+| Model / metric | ADE ↓ (m) | FDE ↓ (m) | MissRate@6 ↓ |
+| --- | ---: | ---: | ---: |
+| Map-aware single trajectory | 3.531 | 8.821 | — |
+| Multimodal probability top-1 | 3.911 | 9.960 | — |
+| Multimodal oracle min@6 | 1.733 | 3.813 | 0.708 |
+
+The oracle metrics show that the six outputs cover futures closer to ground
+truth than the single-path model, while probability-selected top-1 is weaker
+in this run. Per-epoch loss and validation history is in
+`runs/multimodal-20k-cpu/metrics.csv`; its learning curve is saved beside it.
+
 To draw the trained MLP beside the Constant Velocity prediction and ground
 truth, pass its checkpoint to the visualizer:
 

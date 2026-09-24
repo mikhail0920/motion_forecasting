@@ -5,6 +5,7 @@ from motion_forecasting.models.gru import TrajectoryGRU
 from motion_forecasting.models.social_gru import SocialTrajectoryGRU
 from motion_forecasting.models.interaction_gru import InteractionTrajectoryGRU
 from motion_forecasting.models.map_aware_interaction_gru import MapAwareInteractionGRU
+from motion_forecasting.models.multimodal_forecaster import MultimodalForecaster
 
 __all__ = [
     "TrajectoryMLP",
@@ -12,4 +13,5 @@ __all__ = [
     "SocialTrajectoryGRU",
     "InteractionTrajectoryGRU",
     "MapAwareInteractionGRU",
+    "MultimodalForecaster",
 ]

@@ -85,6 +85,25 @@ class MapAwareInteractionGRU(nn.Module):
         *,
         return_attentions: bool = False,
     ) -> torch.Tensor | tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        scene_embedding, social_weights, map_weights = self.encode_scene(
+            history, neighbors, neighbor_mask, lanes, lane_mask
+        )
+        future = self.decoder(scene_embedding).view(
+            history.shape[0], self.future_steps, 2
+        )
+        if return_attentions:
+            return future, social_weights, map_weights
+        return future
+
+    def encode_scene(
+        self,
+        history: torch.Tensor,
+        neighbors: torch.Tensor,
+        neighbor_mask: torch.Tensor,
+        lanes: torch.Tensor,
+        lane_mask: torch.Tensor,
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        """Return the unchanged focal/social/map representation and attentions."""
         batch_size = history.shape[0]
         if history.ndim != 3 or history.shape[-1] != self.input_dim:
             raise ValueError(
@@ -158,8 +177,5 @@ class MapAwareInteractionGRU(nn.Module):
         map_weights = _masked_softmax(map_scores, lane_mask)
         map_context = (lane_embeddings * map_weights.unsqueeze(-1)).sum(dim=1)
 
-        future = self.decoder(torch.cat((focal_embedding, social_context, map_context), dim=-1))
-        future = future.view(batch_size, self.future_steps, 2)
-        if return_attentions:
-            return future, social_weights, map_weights
-        return future
+        scene_embedding = torch.cat((focal_embedding, social_context, map_context), dim=-1)
+        return scene_embedding, social_weights, map_weights
