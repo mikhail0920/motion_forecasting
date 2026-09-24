@@ -433,6 +433,30 @@ retrained scorer history is in
 `runs/lane-conditioned-reranker-20k-cpu/metrics.csv`. The evaluator writes
 results to `checkpoints/lane_conditioned_20k.metrics.json`.
 
+## Interactive scenario player
+
+The Streamlit app is an inference-only tool: it loads a selected scenario,
+local checkpoints, and the matching precomputed map cache. It does not launch
+training. The animated bird's-eye view shows observed actors up to the 5 s
+cutoff, then the selected model's forecast; a separate reveal control overlays
+ground truth. The final multimodal option shows all six reranked hypotheses,
+their softmax scores, and social attention for nearby actors. ADE/FDE and
+oracle metrics stay hidden until ground truth is revealed.
+
+Install and launch from the repository root:
+
+```powershell
+python -m pip install -e ".[train,demo]"
+streamlit run app.py
+```
+
+The sidebar defaults to `data/val`, `cache/val_500_maps.npz`, and
+`checkpoints/`. Change these paths together when browsing another dataset
+split; the selected scenario must exist in the chosen map cache for map-aware
+models. The app expects the local 20k GRU, map-aware, lane-conditioned, and
+lane-conditioned reranker checkpoints under the checkpoint folder. Constant
+Velocity requires no checkpoint.
+
 To draw the trained MLP beside the Constant Velocity prediction and ground
 truth, pass its checkpoint to the visualizer:
 
