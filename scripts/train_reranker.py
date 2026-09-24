@@ -15,7 +15,11 @@ from torch.utils.data import DataLoader, TensorDataset
 
 from motion_forecasting.datasets import MapContextDataset, SocialTrajectoryDataset
 from motion_forecasting.metrics import multimodal_metrics
-from motion_forecasting.models import MultimodalForecaster, TrajectoryAwareModeReranker
+from motion_forecasting.models import (
+    LaneConditionedForecaster,
+    MultimodalForecaster,
+    TrajectoryAwareModeReranker,
+)
 
 
 def _seed_worker(worker_id: int) -> None:
@@ -25,7 +29,7 @@ def _seed_worker(worker_id: int) -> None:
 
 
 def _generate_cache(
-    generator: MultimodalForecaster,
+    generator: torch.nn.Module,
     loader: DataLoader,
     device: torch.device,
 ) -> TensorDataset:
@@ -176,7 +180,13 @@ def main() -> None:
     generator_checkpoint = torch.load(
         args.generator_checkpoint, map_location="cpu", weights_only=False
     )
-    generator = MultimodalForecaster(**generator_checkpoint["model_config"])
+    model_config = generator_checkpoint["model_config"]
+    generator_class = (
+        LaneConditionedForecaster
+        if "num_lane_modes" in model_config
+        else MultimodalForecaster
+    )
+    generator = generator_class(**model_config)
     generator.load_state_dict(generator_checkpoint["model_state_dict"])
     generator.to(device).eval()
     for parameter in generator.parameters():
