@@ -17,6 +17,7 @@ class LaneConditionedForecaster(MultimodalForecaster):
         num_modes: int = 6,
         num_lane_modes: int = 4,
         sampling_interval: float = 0.1,
+        clamp_lane_anchor: bool | None = None,
         **kwargs: int,
     ) -> None:
         if num_modes < 1 or num_lane_modes < 0 or num_lane_modes > num_modes:
@@ -28,6 +29,13 @@ class LaneConditionedForecaster(MultimodalForecaster):
             raise ValueError("num_lane_modes cannot exceed max_lanes")
         self.num_lane_modes = num_lane_modes
         self.sampling_interval = sampling_interval
+        # Preserve legacy checkpoints trained on short individual lane
+        # segments; long route caches keep the anchor on the supplied route.
+        self.clamp_lane_anchor = (
+            self.points_per_lane > 20
+            if clamp_lane_anchor is None
+            else clamp_lane_anchor
+        )
         self.trajectory_decoder = nn.Sequential(
             nn.Linear(
                 self.hidden_dim * 5 + self.points_per_lane * 2,
@@ -106,7 +114,11 @@ class LaneConditionedForecaster(MultimodalForecaster):
         end = gather_points(upper_index)
         start_distance = cumulative.gather(-1, lower_index)
         segment_length = lengths.gather(-1, lower_index).clamp_min(1e-9)
-        fraction = ((target_progress - start_distance) / segment_length).clamp_min(0.0)
+        fraction = (target_progress - start_distance) / segment_length
+        if self.clamp_lane_anchor:
+            fraction = fraction.clamp(0.0, 1.0)
+        else:
+            fraction = fraction.clamp_min(0.0)
         return start + fraction.unsqueeze(-1) * (end - start)
 
     def generate_with_context(
@@ -186,4 +198,3 @@ class LaneConditionedForecaster(MultimodalForecaster):
         trajectories = anchors + residual
         logits = self.probability_head(scene_embedding)
         return trajectories, logits, scene_embedding
-

@@ -95,12 +95,22 @@ def main() -> None:
     parser.add_argument("--num-neighbors", type=int, default=8)
     parser.add_argument("--num-modes", type=int, default=6)
     parser.add_argument("--num-lane-modes", type=int, default=4)
+    parser.add_argument(
+        "--points-per-lane",
+        type=int,
+        help="Override the initialized checkpoint's lane point count for a route cache.",
+    )
     parser.add_argument("--classification-weight", type=float, default=0.5)
     parser.add_argument("--diversity-weight", type=float, default=0.05)
     parser.add_argument("--diversity-margin", type=float, default=2.0)
     parser.add_argument("--miss-threshold", type=float, default=2.0)
     parser.add_argument("--train-scenarios", type=int)
     parser.add_argument("--num-workers", type=int, default=0)
+    parser.add_argument(
+        "--train-scene-encoder",
+        action="store_true",
+        help="Fine-tune the map/social encoder as well as the route decoder.",
+    )
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--run-name", default="lane-conditioned")
     parser.add_argument(
@@ -116,6 +126,7 @@ def main() -> None:
         or args.num_modes < 1
         or args.num_lane_modes < 0
         or args.num_lane_modes > args.num_modes
+        or (args.points_per_lane is not None and args.points_per_lane < 2)
         or args.classification_weight < 0
         or args.diversity_weight < 0
         or args.diversity_margin < 0
@@ -158,7 +169,11 @@ def main() -> None:
         "future_steps": int(initial_config["future_steps"]),
         "max_neighbors": args.num_neighbors,
         "max_lanes": int(initial_config["max_lanes"]),
-        "points_per_lane": int(initial_config["points_per_lane"]),
+        "points_per_lane": int(
+            args.points_per_lane
+            if args.points_per_lane is not None
+            else initial_config["points_per_lane"]
+        ),
         "num_modes": args.num_modes,
         "num_lane_modes": args.num_lane_modes,
         "sampling_interval": 0.1,
@@ -190,15 +205,16 @@ def main() -> None:
         missing = sorted(expected_encoder_keys - set(pretrained_encoder))
         parser.error(f"initial checkpoint is missing compatible encoder tensors: {missing[:5]}")
     model.load_state_dict(pretrained_encoder, strict=False)
-    for module_name in (
-        "focal_gru",
-        "neighbor_gru",
-        "neighbor_attention",
-        "lane_point_mlp",
-        "map_attention",
-    ):
-        for parameter in getattr(model, module_name).parameters():
-            parameter.requires_grad_(False)
+    if not args.train_scene_encoder:
+        for module_name in (
+            "focal_gru",
+            "neighbor_gru",
+            "neighbor_attention",
+            "lane_point_mlp",
+            "map_attention",
+        ):
+            for parameter in getattr(model, module_name).parameters():
+                parameter.requires_grad_(False)
     model.to(device)
 
     train_trajectories = SocialTrajectoryDataset(
@@ -214,6 +230,21 @@ def main() -> None:
     )
     train_data = MapContextDataset(train_trajectories, args.train_map_cache)
     val_data = MapContextDataset(val_trajectories, args.val_map_cache)
+    expected_map_shape = (
+        model_config["max_lanes"],
+        model_config["points_per_lane"],
+        model_config["lane_dim"],
+    )
+    if train_data.lanes.shape[1:] != expected_map_shape:
+        parser.error(
+            f"train map cache has shape {train_data.lanes.shape[1:]}; "
+            f"model expects {expected_map_shape}"
+        )
+    if val_data.lanes.shape[1:] != expected_map_shape:
+        parser.error(
+            f"validation map cache has shape {val_data.lanes.shape[1:]}; "
+            f"model expects {expected_map_shape}"
+        )
     train_generator = torch.Generator().manual_seed(args.seed)
     loader_options = {
         "num_workers": args.num_workers,
@@ -262,7 +293,8 @@ def main() -> None:
         flush=True,
     )
     print(
-        f"Warm-started frozen scene encoder from {args.init_checkpoint}; "
+        f"Warm-started scene encoder from {args.init_checkpoint}; "
+        f"fine-tuning={args.train_scene_encoder}; "
         f"modes={args.num_modes} ({args.num_lane_modes} lane + "
         f"{args.num_modes - args.num_lane_modes} free)",
         flush=True,
@@ -272,14 +304,15 @@ def main() -> None:
         writer.writeheader()
         for epoch in range(1, args.epochs + 1):
             model.train()
-            for module_name in (
-                "focal_gru",
-                "neighbor_gru",
-                "neighbor_attention",
-                "lane_point_mlp",
-                "map_attention",
-            ):
-                getattr(model, module_name).eval()
+            if not args.train_scene_encoder:
+                for module_name in (
+                    "focal_gru",
+                    "neighbor_gru",
+                    "neighbor_attention",
+                    "lane_point_mlp",
+                    "map_attention",
+                ):
+                    getattr(model, module_name).eval()
             epoch_losses: list[list[float]] = []
             for batch in train_loader:
                 history = batch["history"].to(device)
@@ -355,7 +388,8 @@ def main() -> None:
                         "model_state_dict": model.state_dict(),
                         "model_config": model_config,
                         "init_checkpoint": str(args.init_checkpoint),
-                        "frozen_scene_encoder": True,
+                        "frozen_scene_encoder": not args.train_scene_encoder,
+                        "train_scene_encoder": args.train_scene_encoder,
                         "representation": "agent-centric",
                         "train_scenarios": len(train_data),
                         "seed": args.seed,

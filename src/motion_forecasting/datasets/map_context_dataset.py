@@ -23,8 +23,11 @@ class MapContextDataset(Dataset[dict[str, torch.Tensor]]):
             all_lanes = cache["lanes"].astype(np.float32)
             all_masks = cache["lane_mask"].astype(np.bool_)
 
-        if all_lanes.ndim != 4 or all_lanes.shape[-2:] != (20, 4):
-            raise ValueError(f"Expected cached lanes [scenarios, lanes, 20, 4], got {all_lanes.shape}")
+        if all_lanes.ndim != 4 or all_lanes.shape[-1] != 4 or all_lanes.shape[-2] < 2:
+            raise ValueError(
+                "Expected cached lanes [scenarios, lanes, points>=2, 4], "
+                f"got {all_lanes.shape}"
+            )
         if all_masks.shape != all_lanes.shape[:2]:
             raise ValueError("lane_mask dimensions do not match cached lane tensors")
         if len(cache_ids) != len(all_lanes) or len(set(cache_ids.tolist())) != len(cache_ids):
